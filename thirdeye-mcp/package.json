@@ -1,0 +1,19 @@
+{
+  "name": "thirdeye-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that exposes the ThirdEye AI code-review platform to IBM Bob",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "bin": { "thirdeye-mcp": "./build/index.js" },
+  "files": ["build"],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

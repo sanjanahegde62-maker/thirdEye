@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #FBF3E7;
+  color: #2A2320;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: #FFD9CF;
+  color: #33233F;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #E4D2AE transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #E4D2AE;
+  border-radius: 999px;
+}
+
+:focus-visible {
+  outline: 2px solid #33233F;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(320%); }
+}
+.animate-scan {
+  animation: scan 3.2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(255, 107, 87, 0.35); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 107, 87, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 107, 87, 0); }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+/* ── Print / PDF export ──────────────────────────────────────────────────── */
+@media print {
+  /* Hide chrome: sidebar, topbar, nav */
+  aside,
+  nav,
+  header,
+  [data-topbar],
+  [data-sidebar] {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  /* Unwrap the fixed-height flex shell so content flows naturally */
+  .flex.h-screen,
+  .flex.h-screen > .flex.flex-1.flex-col {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  /* No shadows on paper; preserve background colours (risk ring, badges) */
+  * {
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Keep cards intact across page breaks */
+  .rounded-xl2,
+  .rounded-xl {
+    break-inside: avoid;
+  }
+
+  /* Hide the Export PDF button while printing */
+  [data-print-hide] {
+    display: none !important;
+  }
+}

@@ -548,4 +548,275 @@ class StaticAnalysisEngineTest {
             assertThat(findings.stream().anyMatch(f -> f.getDescription().contains("SQLI-001"))).isTrue();
         }
     }
+
+    // ── Regression: raw-code fallback (no diff headers) ──────────────────────
+    /**
+     * These tests reproduce the EXACT code samples the reporter submitted via
+     * the MCP create_review tool (raw Java source, no unified-diff prefix).
+     *
+     * Root cause: DiffParser returned 0 added lines for raw code → 0 findings.
+     * Fix: isUnifiedDiff() detection → raw-code fallback treats every
+     * non-blank line as an added line.
+     */
+    @Nested
+    class RawCodeFallbackTest {
+
+        private final StaticAnalysisEngine engine = new StaticAnalysisEngine();
+        private final Review review = dummyReview();
+
+        // ── DiffParser.isUnifiedDiff() ───────────────────────────────────────
+
+        @Test
+        void isUnifiedDiff_trueForGitDiff() {
+            String d = "--- a/Foo.java\n+++ b/Foo.java\n@@ -0,0 +1 @@\n+code\n";
+            assertThat(DiffParser.isUnifiedDiff(d)).isTrue();
+        }
+
+        @Test
+        void isUnifiedDiff_falseForRawCode() {
+            String raw = "public class Foo {\n    void bar() {}\n}\n";
+            assertThat(DiffParser.isUnifiedDiff(raw)).isFalse();
+        }
+
+        @Test
+        void isUnifiedDiff_trueWhenOnlyHunkHeader() {
+            // A hunk header without a +++ line should still be treated as diff
+            assertThat(DiffParser.isUnifiedDiff("@@ -1,3 +1,4 @@\n code\n")).isTrue();
+        }
+
+        // ── Raw Java SQL injection (exact reporter sample) ───────────────────
+
+        /**
+         * REPORTER SAMPLE 1 — SQL injection via Statement + string concatenation.
+         * Previously returned ZERO findings because the code was submitted as raw
+         * source (no '+' prefix on each line).
+         */
+        @Test
+        void rawCode_sqlInjectionViaStatementAndConcat_detected() {
+            String rawCode =
+                    "import java.sql.*;\n" +
+                    "public class UserDao {\n" +
+                    "    public void login(String username) throws Exception {\n" +
+                    "        Connection conn = DriverManager.getConnection(\"jdbc:mysql://localhost/db\");\n" +
+                    "        Statement stmt = conn.createStatement();\n" +
+                    "        String query = \"SELECT * FROM users WHERE username='\" + username + \"'\";\n" +
+                    "        ResultSet rs = stmt.executeQuery(query);\n" +
+                    "    }\n" +
+                    "}\n";
+
+            List<Finding> findings = engine.analyze(review, rawCode);
+            assertThat(findings).isNotEmpty();
+            boolean hasSql = findings.stream()
+                    .anyMatch(f -> f.getDescription().contains("SQLI-001"));
+            assertThat(hasSql)
+                    .as("Expected SQLI-001 finding for raw SQL injection code")
+                    .isTrue();
+        }
+
+        /**
+         * The execute-with-variable pattern should also be detected on the
+         * {@code stmt.executeQuery(query)} line, even when the query assembly
+         * is on a separate line.
+         */
+        @Test
+        void rawCode_statementExecuteWithVariable_detected() {
+            String rawCode =
+                    "Statement stmt = conn.createStatement();\n" +
+                    "String query = buildQuery(username);\n" +
+                    "ResultSet rs = stmt.executeQuery(query);\n";
+
+            List<Finding> findings = engine.analyze(review, rawCode);
+            boolean hasSql = findings.stream()
+                    .anyMatch(f -> f.getDescription().contains("SQLI-001"));
+            assertThat(hasSql)
+                    .as("Expected SQLI-001 for stmt.executeQuery(variable)")
+                    .isTrue();
+        }
+
+        // ── Raw Java hardcoded password (exact reporter sample) ───────────────
+
+        /**
+         * REPORTER SAMPLE 2 — Hardcoded password literal.
+         * Previously returned ZERO findings because the code was submitted as raw
+         * source (no '+' prefix on each line).
+         */
+        @Test
+        void rawCode_hardcodedPassword_detected() {
+            String rawCode =
+                    "public class DbConfig {\n" +
+                    "    private static final String PASSWORD = \"supersecret123\";\n" +
+                    "    public Connection connect() throws Exception {\n" +
+                    "        return DriverManager.getConnection(url, \"admin\", PASSWORD);\n" +
+                    "    }\n" +
+                    "}\n";
+
+            List<Finding> findings = engine.analyze(review, rawCode);
+            assertThat(findings).isNotEmpty();
+            boolean hasCred = findings.stream()
+                    .anyMatch(f -> f.getDescription().contains("CRED-001"));
+            assertThat(hasCred)
+                    .as("Expected CRED-001 finding for raw hardcoded password code")
+                    .isTrue();
+        }
+
+        // ── Safe code: PreparedStatement (must NOT fire) ─────────────────────
+
+        @Test
+        void rawCode_preparedStatement_noSqlInjectionFinding() {
+            String rawCode =
+                    "public void login(String username) throws Exception {\n" +
+                    "    PreparedStatement ps = conn.prepareStatement(\n" +
+                    "        \"SELECT * FROM users WHERE username = ?\");\n" +
+                    "    ps.setString(1, username);\n" +
+                    "    ResultSet rs = ps.executeQuery();\n" +
+                    "}\n";
+
+            List<Finding> findings = engine.analyze(review, rawCode);
+            boolean hasSql = findings.stream()
+                    .anyMatch(f -> f.getDescription().contains("SQLI-001"));
+            assertThat(hasSql)
+                    .as("PreparedStatement code must NOT trigger SQLI-001")
+                    .isFalse();
+        }
+
+        // ── Clean Java: no vulnerability (must return empty) ─────────────────
+
+        @Test
+        void rawCode_cleanJavaCode_noFindings() {
+            String rawCode =
+                    "public class Calculator {\n" +
+                    "    public int add(int a, int b) {\n" +
+                    "        return a + b;\n" +
+                    "    }\n" +
+                    "    public int multiply(int a, int b) {\n" +
+                    "        return a * b;\n" +
+                    "    }\n" +
+                    "}\n";
+
+            List<Finding> findings = engine.analyze(review, rawCode);
+            assertThat(findings)
+                    .as("Clean Java code with no SQL, credentials, exec, or deserialization must return 0 findings")
+                    .isEmpty();
+        }
+
+        // ── Valid diff with findings on added lines ───────────────────────────
+
+        @Test
+        void unifiedDiff_findingsOnAddedLines_detected() {
+            String d = diff("src/main/java/UserService.java",
+                    "String query = \"SELECT * FROM users WHERE id='\" + id + \"'\";",
+                    "String password = \"hardcoded_pass!\";");
+
+            List<Finding> findings = engine.analyze(review, d);
+            boolean hasSql  = findings.stream().anyMatch(f -> f.getDescription().contains("SQLI-001"));
+            boolean hasCred = findings.stream().anyMatch(f -> f.getDescription().contains("CRED-001"));
+            assertThat(hasSql).as("SQL injection must be detected on added diff line").isTrue();
+            assertThat(hasCred).as("Hardcoded password must be detected on added diff line").isTrue();
+        }
+
+        @Test
+        void unifiedDiff_findingsHaveCorrectFileAndLine() {
+            String d = diff("src/main/java/UserService.java",
+                    "String password = \"hardcoded_secret\";");
+            List<Finding> findings = engine.analyze(review, d);
+            assertThat(findings).isNotEmpty();
+            Finding f = findings.get(0);
+            assertThat(f.getFile()).isEqualTo("src/main/java/UserService.java");
+            assertThat(f.getLine()).isEqualTo(1);
+        }
+
+        // ── Empty and malformed input ─────────────────────────────────────────
+
+        @Test
+        void nullInput_returnsSingleEmptyDiffFinding() {
+            List<Finding> findings = engine.analyze(review, null);
+            assertThat(findings).hasSize(1);
+            assertThat(findings.get(0).getTitle()).isEqualTo("No code changes submitted");
+            assertThat(findings.get(0).getSeverity()).isEqualTo("low");
+        }
+
+        @Test
+        void blankInput_returnsSingleEmptyDiffFinding() {
+            List<Finding> findings = engine.analyze(review, "   \n\t  ");
+            assertThat(findings).hasSize(1);
+            assertThat(findings.get(0).getTitle()).isEqualTo("No code changes submitted");
+        }
+
+        @Test
+        void malformedInput_nonJavaText_noSecurityFindings() {
+            // Malformed input that is not code and not a diff
+            String junk = "Lorem ipsum dolor sit amet\nconsectetur adipiscing elit\n";
+            List<Finding> findings = engine.analyze(review, junk);
+            boolean hasSecurityFinding = findings.stream()
+                    .anyMatch(f -> "security".equals(f.getCategory()));
+            assertThat(hasSecurityFinding)
+                    .as("Non-code text must not produce false-positive security findings")
+                    .isFalse();
+        }
+
+        // ── DiffParser raw-code line numbering ───────────────────────────────
+
+        @Test
+        void rawCode_lineNumbersAre1Based() {
+            String raw = "line one\nline two\nline three\n";
+            List<DiffLine> lines = DiffParser.parse(raw);
+            assertThat(lines).hasSize(3);
+            assertThat(lines.get(0).getLineNumber()).isEqualTo(1);
+            assertThat(lines.get(1).getLineNumber()).isEqualTo(2);
+            assertThat(lines.get(2).getLineNumber()).isEqualTo(3);
+        }
+
+        @Test
+        void rawCode_blankLinesSkipped_lineNumbersReflectSourcePosition() {
+            String raw = "line one\n\nline three\n";
+            List<DiffLine> lines = DiffParser.parse(raw);
+            // blank line is skipped but line numbers reflect position in source
+            assertThat(lines).hasSize(2);
+            assertThat(lines.get(0).getLineNumber()).isEqualTo(1);
+            assertThat(lines.get(1).getLineNumber()).isEqualTo(3);
+        }
+
+        @Test
+        void rawCode_fileIsUnknown() {
+            List<DiffLine> lines = DiffParser.parse("int x = 1;\n");
+            assertThat(lines).hasSize(1);
+            assertThat(lines.get(0).getFile()).isEqualTo("unknown");
+        }
+
+        // ── SqlInjectionRule: Pattern 2 (execute with variable, no concat) ───
+
+        @Test
+        void sqlRule_executeQueryWithVariableArg_detected() {
+            SqlInjectionRule rule = new SqlInjectionRule();
+            List<DiffLine> lines = List.of(
+                    new DiffLine("Dao.java", 20, "ResultSet rs = stmt.executeQuery(userQuery);"));
+            List<RuleFinding> findings = rule.analyze(lines);
+            assertThat(findings).isNotEmpty();
+            assertThat(findings.get(0).getDescription()).contains("SQLI-001");
+        }
+
+        @Test
+        void sqlRule_preparedStatementExecuteQuery_notFlagged() {
+            SqlInjectionRule rule = new SqlInjectionRule();
+            // ps.executeQuery() with no argument (PreparedStatement normal usage)
+            List<DiffLine> lines = List.of(
+                    new DiffLine("Dao.java", 10,
+                            "PreparedStatement ps = conn.prepareStatement(sql); ResultSet rs = ps.executeQuery();"));
+            List<RuleFinding> findings = rule.analyze(lines);
+            boolean hasSql = findings.stream().anyMatch(f -> f.getDescription().contains("SQLI-001"));
+            assertThat(hasSql).isFalse();
+        }
+
+        @Test
+        void sqlRule_executeQueryWithStringLiteral_notFlaggedByPattern2() {
+            SqlInjectionRule rule = new SqlInjectionRule();
+            // executeQuery with a string literal is not flagged by pattern 2
+            // (it also lacks SQL keyword + concat, so pattern 1 won't fire either)
+            List<DiffLine> lines = List.of(
+                    new DiffLine("Dao.java", 5,
+                            "stmt.executeQuery(\"SELECT * FROM users\");"));
+            // The line has no concat and no variable arg → no finding
+            assertThat(rule.analyze(lines)).isEmpty();
+        }
+    }
 }

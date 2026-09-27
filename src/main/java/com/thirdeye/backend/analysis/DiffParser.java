@@ -45,15 +45,55 @@ public final class DiffParser {
     private DiffParser() {}
 
     /**
+     * Returns {@code true} when the text looks like a proper unified diff
+     * (contains at least one {@code +++} file header or {@code @@} hunk header).
+     *
+     * <p>Used to select between unified-diff parsing and raw-code fallback.
+     */
+    static boolean isUnifiedDiff(String text) {
+        for (String line : text.split("\n", -1)) {
+            if (line.startsWith("+++ ") || line.startsWith("@@")) return true;
+        }
+        return false;
+    }
+
+    /**
      * Parse the supplied diff text and return all added lines with metadata.
      *
-     * @param diff unified diff text; may be {@code null} or empty.
+     * <p>Two modes:
+     * <ol>
+     *   <li><strong>Unified diff</strong>: standard git-diff format — only
+     *       lines with a leading {@code +} (added lines) are collected.</li>
+     *   <li><strong>Raw source fallback</strong>: when the input contains no
+     *       diff markers ({@code +++ } or {@code @@}), every non-blank line is
+     *       treated as an added line so that pasted raw Java code is still
+     *       analysed.  File will be {@code "unknown"} and line numbers are
+     *       1-based positions within the pasted text.</li>
+     * </ol>
+     *
+     * @param diff unified diff text or raw source code; may be {@code null} or empty.
      * @return ordered list of added {@link DiffLine}s; empty when nothing
      *         could be parsed.
      */
     public static List<DiffLine> parse(String diff) {
         List<DiffLine> result = new ArrayList<>();
         if (diff == null || diff.isBlank()) return result;
+
+        // ── Raw-source fallback ───────────────────────────────────────────
+        // When the submitted text is not a unified diff (no +++ or @@ markers),
+        // treat every non-blank line as an added line so that users who paste
+        // raw Java source still receive findings.
+        if (!isUnifiedDiff(diff)) {
+            String[] lines = diff.split("\n", -1);
+            int lineNum = 1;
+            for (String raw : lines) {
+                if (!raw.isBlank()) {
+                    result.add(new DiffLine("unknown", lineNum, raw));
+                }
+                lineNum++;
+            }
+            return result;
+        }
 
         String[] lines  = diff.split("\n", -1);
         String   file   = "unknown";

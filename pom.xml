@@ -59,6 +59,11 @@
 			<artifactId>h2</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
 		<!--
 		    Spring Boot 4.x moved H2ConsoleAutoConfiguration out of
 		    spring-boot-autoconfigure into this dedicated module.

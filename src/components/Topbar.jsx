@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+ï»¿import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, GitBranch, Check, Bell, User, Settings, LogOut, Loader2, CheckCheck } from 'lucide-react'
+import { ChevronDown, GitBranch, Check, Bell, User, Settings, LogOut, Loader2, CheckCheck, Plus } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { getNotifications, getNotificationSummary, markNotificationRead, markAllNotificationsRead } from '../services/api/notifications'
 
@@ -36,7 +36,7 @@ const EVENT_LABELS = {
 
 // -- Component ----------------------------------------------------------------
 
-export default function Topbar({ projects = [], activeProject, setActiveProject }) {
+export default function Topbar({ projects = [], activeProject, setActiveProject, onNewProject }) {
   const navigate         = useNavigate()
   const { user, logout } = useAuth()
 
@@ -62,7 +62,7 @@ export default function Topbar({ projects = [], activeProject, setActiveProject 
       setNotifications(list || [])
       setUnreadCount(summary?.unread ?? 0)
     } catch {
-      // silently skip — don't block the UI
+      // silently skip â€” don't block the UI
     } finally {
       setNotifLoading(false)
     }
@@ -165,6 +165,15 @@ export default function Topbar({ projects = [], activeProject, setActiveProject 
                 {p.id === activeProject.id && <Check size={16} className="text-coral" />}
               </button>
             ))}
+            {onNewProject && (
+              <button role="menuitem"
+                onClick={() => { setActiveMenu(null); onNewProject() }}
+                className="flex w-full items-center gap-2.5 border-t border-sand-line px-4 py-3 text-left text-sm font-medium text-plum/60 transition-colors hover:bg-sand/40 hover:text-plum"
+              >
+                <Plus size={14} />
+                New project
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -264,7 +273,7 @@ export default function Topbar({ projects = [], activeProject, setActiveProject 
         <div className="relative" ref={profileRef}>
           <button
             onClick={() => setActiveMenu(m => m === 'profile' ? null : 'profile')}
-            aria-label={`${displayName} — profile`}
+            aria-label={`${displayName} â€” profile`}
             aria-expanded={activeMenu === 'profile'}
             aria-haspopup="dialog"
             className="flex h-9 w-9 items-center justify-center rounded-full bg-plum font-serif text-sm font-semibold text-ivory-100 transition-colors hover:bg-plum/90"
@@ -314,3 +323,4 @@ export default function Topbar({ projects = [], activeProject, setActiveProject 
     </header>
   )
 }
+

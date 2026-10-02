@@ -50,7 +50,11 @@ export default function Register() {
       await register(fullName.trim(), email.trim(), password)
       navigate("/dashboard/overview", { replace: true })
     } catch (err) {
-      setError(err?.message || "Registration failed. Please try again.")
+      if (err?.name === 'NetworkError') {
+        setError(err.message)
+      } else {
+        setError(err?.message || "Registration failed. Please try again.")
+      }
     } finally {
       setLoading(false)
     }
@@ -189,3 +193,4 @@ export default function Register() {
     </div>
   )
 }
+

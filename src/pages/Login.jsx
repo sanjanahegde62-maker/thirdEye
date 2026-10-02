@@ -33,7 +33,11 @@ export default function Login() {
       await login(email.trim(), password)
       navigate("/dashboard/overview", { replace: true })
     } catch (err) {
-      setError(err?.message || "Invalid email or password.")
+      if (err?.name === 'NetworkError') {
+        setError(err.message)
+      } else {
+        setError(err?.message || "Invalid email or password.")
+      }
     } finally {
       setLoading(false)
     }
@@ -143,3 +147,4 @@ export default function Login() {
     </div>
   )
 }
+

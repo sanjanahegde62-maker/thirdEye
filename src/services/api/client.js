@@ -13,6 +13,17 @@ export class ApiError extends Error {
   }
 }
 
+/** Network-level error (no HTTP response received). */
+export class NetworkError extends Error {
+  constructor(cause) {
+    super(
+      'Could not reach the server. Please check your internet connection and try again.'
+    )
+    this.name = 'NetworkError'
+    this.cause = cause
+  }
+}
+
 function buildUrl(path) {
   if (typeof path !== 'string' || path.length === 0) {
     throw new TypeError('An API path or URL is required.')
@@ -25,11 +36,14 @@ function buildUrl(path) {
 }
 
 /**
- * Send a request to a caller-supplied path. Endpoint paths and HTTP methods are
- * intentionally left to the eventual backend API contract.
+ * Send a request to a caller-supplied path.
  *
  * credentials: 'include' is required for session-based auth so the browser
  * sends the JSESSIONID cookie with cross-origin requests to the Spring backend.
+ *
+ * Throws:
+ *  - NetworkError  if the request could not reach the server at all
+ *  - ApiError      if the server returned a non-2xx status
  */
 export async function apiRequest(path, options = {}) {
   const { headers: suppliedHeaders, body, ...requestOptions } = options
@@ -49,12 +63,18 @@ export async function apiRequest(path, options = {}) {
     if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(buildUrl(path), {
-    ...requestOptions,
-    headers,
-    credentials: 'include',
-    ...(requestBody === undefined ? {} : { body: requestBody }),
-  })
+  let response
+  try {
+    response = await fetch(buildUrl(path), {
+      ...requestOptions,
+      headers,
+      credentials: 'include',
+      ...(requestBody === undefined ? {} : { body: requestBody }),
+    })
+  } catch (fetchError) {
+    // TypeError from fetch = network-level failure (offline, DNS, CORS preflight blocked)
+    throw new NetworkError(fetchError)
+  }
 
   if (response.status === 204) return null
 
